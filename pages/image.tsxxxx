@@ -1,0 +1,148 @@
+import { useEffect, useState } from 'react';
+import '../public/pico.min.css'
+import {humanizeSize, pngArrayBufferToBase64} from "../utils";
+import * as ImageModule from "../public/image/image";
+import * as Comlink from "../public/comlink.mjs";
+
+
+interface OriginalImage {
+  file: File;
+  arrayBuffer: ArrayBuffer;
+  base64: string
+  size: string
+}
+
+interface OptimizedImage {
+  arrayBuffer: ArrayBuffer;
+  base64: string
+  size: string
+}
+
+
+const ImageOptimizer = () => {
+  const [optimizationLevel, setOptimizationLevel] = useState(1);
+  const [worker, setWorker] = useState(null);
+
+  const [original, setOriginal] = useState<OriginalImage | null>(null);
+  const [optimized, setOptimized] = useState<OptimizedImage | null>(null);
+
+  const [png, setPng] = useState<ImageModule.Png | null>(null);
+
+  useEffect(() => {
+    async function loadWasm() {
+      console.log("in loadwasm")
+      const ImageWorker = Comlink.wrap(new Worker("../imageWorker.ts", { type: "module" }));
+      console.log('between', ImageWorker)
+      await ImageModule.default();
+      console.log('between')
+      setWorker(ImageWorker);
+      console.log("worker", worker)
+    }
+    loadWasm();
+  }, []);
+
+  useEffect(() => {
+    async function upload_png(arrayBuffer: ArrayBuffer) {
+      try {
+        // worker gets checked below in the if clause
+        console.log("HEREEE")
+        const png = await worker.upload_png(arrayBuffer);
+        console.log("png", png)
+        setPng(png);
+      } catch (err) {
+        err = "new Png() failed" + err;
+        console.error(err);
+        alert(err);
+      }
+    }
+    if (worker && original) {
+      upload_png(original.arrayBuffer);
+    }
+  }, [worker, original]);
+
+  useEffect(() => {
+    async function optimize_png(
+      png: ImageModule.Png,
+      optimizationLevel: number
+    ) {
+      try {
+        // png can only be obtained from worker so worker is not null
+        const result = await worker.optimize_png(png, optimizationLevel);
+        setOptimized({
+          arrayBuffer: result,
+          base64: pngArrayBufferToBase64(result),
+          size: humanizeSize(result.byteLength),
+        });
+      } catch (err) {
+        console.error("optimize_png useEffect", err);
+        alert(err);
+      }
+    }
+
+    if (png) {
+      optimize_png(png, optimizationLevel);
+    }
+  }, [png, optimizationLevel]);
+
+  const handleImageUpload = (e: React.ChangeEvent) => {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setOriginal({
+        file,
+        arrayBuffer: reader.result as ArrayBuffer,
+        base64: pngArrayBufferToBase64(reader.result as ArrayBuffer),
+        size: humanizeSize(file.size),
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleSliderChange = (e: React.ChangeEvent) => {
+    setOptimizationLevel(e.target.value);
+  };
+
+  const handleDownload = () => {
+    // Implement your download logic here
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex" }}>
+        <div>
+          <input type="file" onChange={handleImageUpload} />
+          {original && (
+            <div>
+              <img src={original.base64} alt="Original" />
+              Size: {original.size}
+            </div>
+          )}
+        </div>
+        <div>
+          {png &&
+            (optimized ? (
+              <img src={optimized.base64} alt="Optimized" />
+            ) : (
+              <img alt="Optimized" aria-busy="true" />
+            ))}
+        </div>
+      </div>
+      <div>
+        <input
+          type="range"
+          min="0"
+          max="6"
+          value={optimizationLevel}
+          onChange={handleSliderChange}
+        />
+      </div>
+      <div>
+        <button onClick={handleDownload} disabled={!optimized}>
+          Download Optimized Image
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default ImageOptimizer;
